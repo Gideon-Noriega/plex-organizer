@@ -1,89 +1,170 @@
-# Plex Media Organizer
+# Plex Organizer
 
-Script to organize Plex media files into proper naming convention with genre folders.
+A CLI tool to automatically organize messy media files into proper [Plex naming conventions](https://support.plex.tv/articles/naming-and-organizing-your-movie-media-files/) with genre-based folder structure.
 
-## Structure
+## Features
+
+- Parse movie titles and years from messy filenames (strips release group tags, quality markers, etc.)
+- Auto-detect genres via [TMDb API](https://www.themoviedb.org/documentation/api) (free)
+- YAML config file for custom genre maps, title overrides, and TV show overrides
+- Organize movies into `{Genre}/{Title} ({Year})/` structure
+- Organize TV into `{Show} ({Year})/Season {XX}/` structure
+- Move associated subtitle files (.srt, .sub, .ass) alongside videos
+- Skip extras/featurettes/samples automatically
+- Dry run mode to preview before executing
+- Undo support via `moves.json` log
+
+## Installation
+
+```bash
+# Clone and install
+git clone https://github.com/gideon/plex-organizer.git
+cd plex-organizer
+pip install -e .
+
+# Or install dependencies manually
+pip install -r requirements.txt
+```
+
+## Quick Start
+
+```bash
+# Preview what would happen (no files moved)
+plex-organizer --movies /plex/movies --dry-run
+
+# Organize movies with TMDb genre detection
+plex-organizer --movies /plex/movies --tmdb-api-key YOUR_KEY
+
+# Organize TV shows
+plex-organizer --tv /plex/tv
+
+# Both at once
+plex-organizer --movies /plex/movies --tv /plex/tv --tmdb-api-key YOUR_KEY
+
+# Use a config file (recommended)
+plex-organizer --config config.yaml
+
+# Skip confirmation prompt
+plex-organizer --movies /plex/movies --yes
+
+# Undo the last batch of moves
+plex-organizer --undo
+```
+
+## Configuration
+
+Create a `config.yaml` file (see `config.yaml` for a full example):
+
+```yaml
+# Media directories
+movies_dir: "/plex/movies"
+tv_dir: "/plex/tv"
+
+# TMDb API key (free: https://www.themoviedb.org/settings/api)
+tmdb_api_key: "your_api_key_here"
+
+# Manual genre overrides (checked before TMDb)
+genre_map:
+  Action:
+    - "Punisher"
+    - "Jack Ryan"
+  Sci-Fi:
+    - "Avatar"
+    - "Jurassic World"
+
+# Fix titles the parser gets wrong
+title_overrides:
+  "Tom Clancys Jack Ryan Ghost War": "Jack Ryan Ghost War"
+  "Good Luck Have Fun Dont Die": "Good Luck Have Fun Don't Die"
+
+# TV shows with messy folder names
+tv_overrides:
+  "Jujutsu Kaisen (Season 2) [1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs]":
+    name: "Jujutsu Kaisen"
+    year: "2020"
+    season: "Season 02"
+```
+
+## TMDb API Key
+
+Get a free API key at https://www.themoviedb.org/settings/api
+
+Set it via (in priority order):
+1. `--tmdb-api-key` CLI flag
+2. `TMDB_API_KEY` environment variable
+3. `tmdb_api_key` in config.yaml
+
+## Output Structure
 
 ### Movies
-```
-/plex/movies/{Genre}/{Movie Name} ({Year})/{Movie Name} ({Year}).ext
-```
 
-Genres: Action, Adventure, Comedy, Drama, International, Other, Sci-Fi
+```
+/plex/movies/
+  Action/
+    The Punisher One Last Kill (2025)/
+      The Punisher One Last Kill (2025).mkv
+      The Punisher One Last Kill (2025).eng.srt
+  Drama/
+    The Pursuit of Happyness (2006)/
+      The Pursuit of Happyness (2006).mkv
+  Sci-Fi/
+    Avatar (2009)/
+      Avatar (2009).mkv
+```
 
 ### TV Shows
+
 ```
-/plex/tv/{Show Name} ({Year})/Season {XX}/episodes...
+/plex/tv/
+  Abbott Elementary (2021)/
+    Season 01/
+      Abbott.Elementary.S01E01.mkv
+    Season 02/
+      Abbott.Elementary.S02E01.mkv
+  The Copenhagen Test (2025)/
+    Season 01/
+      episode files...
 ```
 
-## Usage
+## Edge Cases Handled
+
+- **Subtitles**: `.srt`, `.sub`, `.ass`, `.ssa`, `.vtt`, `.idx` files are moved with their video, preserving language tags
+- **Multi-file movies**: Folders containing multiple files pick the largest video file
+- **Extras/featurettes**: Files with "featurette", "behind the scenes", "deleted scenes", "sample", etc. are skipped
+- **Release group tags**: BONE, NeoNoir, YTS, GalaxyRG, TGx, FLUX, etc. are stripped from titles
+- **Quality markers**: 1080p, 4K, x265, HEVC, WEB-DL, BluRay, etc. are stripped
+- **Existing organization**: Genre folders and already-organized files are not re-processed
+
+## Undo
+
+Every run saves a detailed log to `moves.json`. To reverse the last batch:
 
 ```bash
-# Preview changes (no files moved)
-sudo python3 ~/projects/plex-organizer/organize_plex.py --dry-run
-
-# Execute for real
-sudo python3 ~/projects/plex-organizer/organize_plex.py
+plex-organizer --undo
+plex-organizer --undo --log-file /path/to/moves.json
 ```
 
-Note: Must run with sudo because /plex/ is owned by nobody:nogroup (NFS/SMB mount).
+## Development
 
-## What the script does
-
-1. **Movies:** Extracts title + year from messy filenames, removes release group tags (BONE, NeoNoir, Rapta, YTS, etc.), assigns genre, creates proper folder structure
-2. **TV Shows:** Merges multi-season folders (Abbott Elementary, The Rookie), fixes naming, adds Season folders for single-season shows
-
-## Post-run manual fixes
-
-After running the script, check for:
-- Apostrophes in titles (e.g., "Youre" -> "You're")
-- Years without parentheses (e.g., "Movie 2019" -> "Movie (2019)")
-- Title overrides that didn't catch (check TITLE_OVERRIDES in script)
-- Genre mismatches (check GENRE_MAP in script)
-- Nested season folders (e.g., show had "Season 1" subfolder already)
-
-## Adding new movies/shows
-
-When adding new movies, either:
-1. Drop them in the correct genre folder with proper naming: `/plex/movies/Action/Movie Name (2026)/Movie Name (2026).mkv`
-2. Or drop them in `/plex/movies/` root and re-run the script (update GENRE_MAP first)
-
-For TV shows:
-1. Create folder: `/plex/tv/Show Name (Year)/Season XX/`
-2. Drop episodes inside with proper naming
-
-## Plex settings
-
-After reorganizing, restart Plex to trigger rescan:
 ```bash
-sudo systemctl restart plexmediaserver
+# Install with dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Run with coverage
+pytest --cov=plex_organizer
 ```
 
-Or trigger a manual scan in Plex UI: Settings > Libraries > Scan Library Files
+## Requirements
 
-## File ownership
+- Python 3.9+
+- PyYAML (for config file support)
+- Internet access (only if using TMDb API for genre detection)
 
-```
-/plex/ owned by nobody:nogroup (NFS/SMB mount)
-Plex service runs as user: plex
-Server: 192.168.100.43
-Plex version: 1.43.0.10492
-```
+## Notes
 
-## Current inventory (as of 2026-06-02)
-
-| Category | Count | Size |
-|----------|-------|------|
-| Movies (Action) | 20 | - |
-| Movies (Drama) | 21 | - |
-| Movies (Comedy) | 10 | - |
-| Movies (Sci-Fi) | 8 | - |
-| Movies (International) | 5 | - |
-| Movies (Adventure) | 1 | - |
-| Movies (Other) | 1 | - |
-| **Total Movies** | **66** | **126 GB** |
-| TV Shows | 13 | 228 GB |
-| Music | - | 957 MB |
-| **Total Media** | - | **~560 GB** |
-
-Disk: 1.4 TB volume, 406 GB free
+- On NFS/SMB mounts (like `/plex/`), you may need to run with `sudo`
+- After reorganizing, trigger a Plex library scan: Settings > Libraries > Scan Library Files
+- The tool always shows a preview and asks for confirmation before moving files (unless `--yes` is used)

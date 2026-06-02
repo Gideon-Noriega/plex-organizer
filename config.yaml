@@ -1,0 +1,87 @@
+# Plex Organizer Configuration
+# Copy this file and customize for your setup.
+
+# Media directories
+movies_dir: "/plex/movies"
+tv_dir: "/plex/tv"
+
+# TMDb API key (free: https://www.themoviedb.org/settings/api)
+# Can also be set via --tmdb-api-key flag or TMDB_API_KEY env var
+tmdb_api_key: ""
+
+# Genre map: manual genre assignment by title keyword.
+# These take priority over TMDb lookups.
+# Format: genre_name: [list of title keywords]
+genre_map:
+  Action:
+    - "Punisher"
+    - "Mortal Kombat"
+    - "Predator"
+    - "Shadow Force"
+    - "War Machine"
+    - "Jack Ryan"
+    - "Suicide Squad"
+  Comedy:
+    - "Trading Places"
+    - "The Family Plan"
+    - "Bookworm"
+  Drama:
+    - "The Pursuit of Happyness"
+    - "Wolf of Wall Street"
+    - "Big Short"
+  Sci-Fi:
+    - "Avatar"
+    - "Jurassic World"
+    - "Project Hail Mary"
+  International:
+    - "Angkinin"
+    - "Sulutan"
+    - "Solo Mio"
+
+# Title overrides: fix titles that the parser gets wrong.
+# Format: messy_parsed_title: "Correct Title"
+title_overrides:
+  "A Marvel Television Special Presentation The Punisher One Last Kill": "The Punisher One Last Kill"
+  "Avatar The Legend of Aang The Last Airbender": "Avatar The Last Airbender"
+  "Good Luck Have Fun Dont Die": "Good Luck Have Fun Don't Die"
+  "Tom Clancys Jack Ryan Ghost War": "Jack Ryan Ghost War"
+
+# TV overrides: for shows with messy folder names that can't be auto-parsed.
+# Format: original_folder_name: {name: "Show Name", year: "YYYY", season: "Season XX"}
+tv_overrides:
+  "Jujutsu Kaisen (Season 2) [1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs]":
+    name: "Jujutsu Kaisen"
+    year: "2020"
+    season: "Season 02"
+  "The.Copenhagen.Test.S01.1080p.WEB-DL-[Feranki1980]":
+    name: "The Copenhagen Test"
+    year: "2025"
+    season: "Season 01"
+  "Teacup.S01.COMPLETE.1080p.PCOK.WEB-DL.DDP5.1.H.264-FLUX[TGx]":
+    name: "Teacup"
+    year: "2024"
+    season: "Season 01"
+
+# Genre folders: list of valid genre folder names.
+# Directories matching these names won't be re-organized.
+genre_folders:
+  - Action
+  - Adventure
+  - Animation
+  - Comedy
+  - Crime
+  - Documentary
+  - Drama
+  - Family
+  - Fantasy
+  - History
+  - Horror
+  - International
+  - Music
+  - Mystery
+  - Romance
+  - Sci-Fi
+  - Thriller
+  - War
+  - Western
+  - Other
