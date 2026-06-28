@@ -2,11 +2,156 @@
 
 import argparse
 import os
+import subprocess
 import sys
 
 from . import __version__
 from .config import Config, load_config
 from .organizer import PlexOrganizer, undo_moves
+
+
+SERVICE_TEMPLATE = """[Unit]
+Description=Plex Organizer - Organize media into Plex naming conventions
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory={work_dir}
+ExecStart={venv_bin}/plex-organizer --movies {movies_dir} --tv {tv_dir} --config {config_path} --yes
+"""
+
+TIMER_TEMPLATE = """[Unit]
+Description=Run Plex Organizer {frequency_desc}
+
+[Timer]
+OnCalendar={on_calendar}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+def setup_schedule():
+    """Interactive setup for scheduling plex-organizer via systemd timer."""
+    if os.geteuid() != 0:
+        print("Error: --schedule requires root privileges. Run with sudo.")
+        sys.exit(1)
+
+    print("=" * 50)
+    print("  Plex Organizer - Schedule Setup")
+    print("=" * 50)
+    print()
+
+    # Frequency
+    print("How often should the organizer run?")
+    print("  1) Daily")
+    print("  2) Every 12 hours")
+    print("  3) Every 6 hours")
+    print("  4) Weekly (Sunday)")
+    print()
+    freq = input("Choose [1-4] (default: 1): ").strip() or "1"
+
+    # Time
+    print()
+    print("What time should it run? (24-hour format, UTC)")
+    print("  Examples: 22:00 (10pm UTC = 1am EAT)")
+    print("            06:00 (6am UTC = 9am EAT)")
+    print("            00:00 (midnight UTC = 3am EAT)")
+    print()
+    time_input = input("Time [HH:MM] (default: 22:00): ").strip() or "22:00"
+
+    # Validate time format
+    try:
+        parts = time_input.split(":")
+        hour = int(parts[0])
+        minute = int(parts[1])
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise ValueError
+        time_str = f"{hour:02d}:{minute:02d}:00"
+    except (ValueError, IndexError):
+        print(f"Error: Invalid time format '{time_input}'. Use HH:MM (e.g., 22:00)")
+        sys.exit(1)
+
+    # Build OnCalendar string
+    if freq == "1":
+        on_calendar = f"*-*-* {time_str}"
+        frequency_desc = f"daily at {time_input} UTC"
+    elif freq == "2":
+        h2 = (hour + 12) % 24
+        on_calendar = f"*-*-* {hour:02d},{h2:02d}:{minute:02d}:00"
+        frequency_desc = f"every 12 hours at :{minute:02d} UTC"
+    elif freq == "3":
+        hours = ",".join(f"{(hour + i * 6) % 24:02d}" for i in range(4))
+        on_calendar = f"*-*-* {hours}:{minute:02d}:00"
+        frequency_desc = f"every 6 hours starting at {time_input} UTC"
+    elif freq == "4":
+        on_calendar = f"Sun *-*-* {time_str}"
+        frequency_desc = f"weekly on Sundays at {time_input} UTC"
+    else:
+        print(f"Error: Invalid choice '{freq}'")
+        sys.exit(1)
+
+    # Directories
+    print()
+    movies_dir = input("Movies directory (default: /plex/movies): ").strip() or "/plex/movies"
+    tv_dir = input("TV shows directory (default: /plex/tv): ").strip() or "/plex/tv"
+
+    # Detect paths
+    work_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    venv_bin = os.path.dirname(sys.executable)
+    config_path = os.path.join(work_dir, "config.yaml")
+
+    # Summary
+    print()
+    print("-" * 50)
+    print(f"  Schedule:    {frequency_desc}")
+    print(f"  Movies dir:  {movies_dir}")
+    print(f"  TV dir:      {tv_dir}")
+    print(f"  Config:      {config_path}")
+    print(f"  OnCalendar:  {on_calendar}")
+    print("-" * 50)
+    print()
+
+    confirm = input("Install this schedule? [y/N]: ").strip().lower()
+    if confirm not in ("y", "yes"):
+        print("Aborted.")
+        sys.exit(0)
+
+    # Write service file
+    service_content = SERVICE_TEMPLATE.format(
+        work_dir=work_dir,
+        venv_bin=venv_bin,
+        movies_dir=movies_dir,
+        tv_dir=tv_dir,
+        config_path=config_path,
+    )
+    with open("/etc/systemd/system/plex-organizer.service", "w") as f:
+        f.write(service_content)
+
+    # Write timer file
+    timer_content = TIMER_TEMPLATE.format(
+        frequency_desc=frequency_desc,
+        on_calendar=on_calendar,
+    )
+    with open("/etc/systemd/system/plex-organizer.timer", "w") as f:
+        f.write(timer_content)
+
+    # Enable and start
+    subprocess.run(["systemctl", "daemon-reload"], check=True)
+    subprocess.run(["systemctl", "enable", "plex-organizer.timer"], check=True)
+    subprocess.run(["systemctl", "start", "plex-organizer.timer"], check=True)
+
+    print()
+    print("Schedule installed successfully!")
+    print(f"  Timer: plex-organizer.timer ({frequency_desc})")
+    print()
+    print("Useful commands:")
+    print("  systemctl status plex-organizer.timer    # Check next run time")
+    print("  journalctl -u plex-organizer.service -e  # View last run logs")
+    print("  sudo systemctl stop plex-organizer.timer # Stop the schedule")
+    print("  sudo plex-organizer --schedule           # Reconfigure schedule")
 
 
 def main():
@@ -28,6 +173,9 @@ Examples:
 
   # Use a config file
   plex-organizer --config config.yaml
+
+  # Set up automatic scheduling
+  sudo plex-organizer --schedule
 
   # Undo the last batch of moves
   plex-organizer --undo
@@ -81,8 +229,18 @@ Examples:
         default="moves.json",
         help="Path to moves log file (default: ./moves.json)",
     )
+    parser.add_argument(
+        "--schedule",
+        action="store_true",
+        help="Interactive setup for automatic scheduling (requires sudo)",
+    )
 
     args = parser.parse_args()
+
+    # Handle schedule setup
+    if args.schedule:
+        setup_schedule()
+        sys.exit(0)
 
     # Handle undo
     if args.undo:
@@ -132,6 +290,7 @@ Examples:
         sys.exit(0)
 
     # Show preview
+    organizer.moves = total_moves
     print(f"\n{organizer.preview()}")
 
     if args.dry_run:
