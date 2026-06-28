@@ -4,167 +4,186 @@ A CLI tool to automatically organize messy media files into proper [Plex naming 
 
 ## Features
 
-- Parse movie titles and years from messy filenames (strips release group tags, quality markers, etc.)
-- Auto-detect genres via [TMDb API](https://www.themoviedb.org/documentation/api) (free)
-- YAML config file for custom genre maps, title overrides, and TV show overrides
-- Organize movies into `{Genre}/{Title} ({Year})/` structure
-- Organize TV into `{Show} ({Year})/Season {XX}/` structure
-- Move associated subtitle files (.srt, .sub, .ass) alongside videos
-- Skip extras/featurettes/samples automatically
-- Dry run mode to preview before executing
-- Undo support via `moves.json` log
+- **Movie organization** — Parse titles/years from messy filenames, auto-detect genres via TMDb, organize into `{Genre}/{Title} ({Year})/` structure
+- **TV show organization** — Organize into `{Show} ({Year})/Season {XX}/` structure with proper naming
+- **Flatten nested episodes** — Fix episodes buried in subdirectories (common with torrent downloads)
+- **Normalize episode names** — Rename to Plex format: `Show - SXXEXX - Title.ext` (strips release groups, codec tags, torrent site names)
+- **Junk cleanup** — Remove .nfo, torrent site ads (.txt), screenshots, .parts files, and empty directories
+- **Plex integration** — Trigger library scan and empty trash after organizing
+- **TMDb genre detection** — Auto-assign genres via [TMDb API](https://www.themoviedb.org/documentation/api) (free)
+- **Scheduling** — Interactive setup for automatic daily/hourly runs via systemd timer
+- **Dry run mode** — Preview all changes before executing
+- **Undo support** — Reverse moves via `moves.json` log
+- **Subtitle handling** — Move associated .srt/.sub/.ass files alongside videos
+- **Config file** — YAML config for custom genre maps, title overrides, TV show overrides
 
 ## Installation
 
 ```bash
-# Clone and install
-git clone https://github.com/gideon/plex-organizer.git
+git clone https://github.com/Gideon-Noriega/plex-organizer.git
 cd plex-organizer
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
-
-# Or install dependencies manually
-pip install -r requirements.txt
 ```
 
 ## Quick Start
 
 ```bash
 # Preview what would happen (no files moved)
-plex-organizer --movies /plex/movies --dry-run
+plex-organizer --movies /plex/movies --tv /plex/tv --dry-run
 
-# Organize movies with TMDb genre detection
-plex-organizer --movies /plex/movies --tmdb-api-key YOUR_KEY
-
-# Organize TV shows
-plex-organizer --tv /plex/tv
-
-# Both at once
-plex-organizer --movies /plex/movies --tv /plex/tv --tmdb-api-key YOUR_KEY
+# Organize everything with TMDb genre detection
+plex-organizer --movies /plex/movies --tv /plex/tv --tmdb-api-key YOUR_KEY --yes
 
 # Use a config file (recommended)
-plex-organizer --config config.yaml
+plex-organizer --movies /plex/movies --tv /plex/tv --config config.yaml --yes
+```
 
-# Skip confirmation prompt
-plex-organizer --movies /plex/movies --yes
+## Commands
 
-# Undo the last batch of moves
+### Organize (default)
+
+```bash
+# Organize movies into genre folders
+plex-organizer --movies /plex/movies --tmdb-api-key YOUR_KEY
+
+# Organize TV shows (flatten + normalize + move)
+plex-organizer --tv /plex/tv
+
+# Both at once with Plex refresh
+plex-organizer --movies /plex/movies --tv /plex/tv --config config.yaml --yes --refresh-plex
+```
+
+### Fix TV Episodes
+
+```bash
+# Flatten nested episodes (move from subdirs to Season folder)
+plex-organizer --flatten --tv /plex/tv
+
+# Normalize episode names to Plex format
+plex-organizer --normalize --tv /plex/tv
+
+# Preview first
+plex-organizer --normalize --tv /plex/tv --dry-run
+```
+
+### Cleanup
+
+```bash
+# Remove junk files (.nfo, torrent ads, screenshots, empty dirs)
+plex-organizer --cleanup --movies /plex/movies --tv /plex/tv
+
+# Preview what would be removed
+plex-organizer --cleanup --tv /plex/tv --dry-run
+```
+
+### Schedule
+
+```bash
+# Interactive setup for automatic scheduling
+sudo plex-organizer --schedule
+```
+
+Options:
+- Daily, every 12h, every 6h, or weekly
+- Choose time (UTC)
+- Auto-installs systemd timer
+
+### Undo
+
+```bash
+# Reverse the last batch of moves
 plex-organizer --undo
 ```
 
 ## Configuration
 
-Create a `config.yaml` file (see `config.yaml` for a full example):
+Copy and edit `config.yaml`:
 
 ```yaml
 # Media directories
 movies_dir: "/plex/movies"
 tv_dir: "/plex/tv"
 
-# TMDb API key (free: https://www.themoviedb.org/settings/api)
-tmdb_api_key: "your_api_key_here"
+# TMDb API key (or use --tmdb-api-key flag or TMDB_API_KEY env var)
+tmdb_api_key: ""
 
-# Manual genre overrides (checked before TMDb)
+# Manual genre assignments (override TMDb)
 genre_map:
   Action:
     - "Punisher"
-    - "Jack Ryan"
-  Sci-Fi:
-    - "Avatar"
-    - "Jurassic World"
+    - "Predator"
+  Comedy:
+    - "Trading Places"
 
-# Fix titles the parser gets wrong
+# Fix misdetected titles
 title_overrides:
-  "Tom Clancys Jack Ryan Ghost War": "Jack Ryan Ghost War"
-  "Good Luck Have Fun Dont Die": "Good Luck Have Fun Don't Die"
+  "Some Messy Parsed Title": "Correct Title"
 
-# TV shows with messy folder names
+# Fix TV shows with unparseable folder names
 tv_overrides:
-  "Jujutsu Kaisen (Season 2) [1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs]":
-    name: "Jujutsu Kaisen"
-    year: "2020"
-    season: "Season 02"
+  "Messy.Show.S01.1080p.WEB-DL":
+    name: "Show Name"
+    year: "2024"
+    season: "Season 01"
+
+# Valid genre folder names (won't be re-organized)
+genre_folders:
+  - Action
+  - Comedy
+  - Drama
+  # ... etc
 ```
 
-## TMDb API Key
+## Environment Variables
 
-Get a free API key at https://www.themoviedb.org/settings/api
+| Variable | Description |
+|----------|-------------|
+| `TMDB_API_KEY` | TMDb API key for genre detection |
+| `PLEX_TOKEN` | Plex authentication token for library refresh |
 
-Set it via (in priority order):
-1. `--tmdb-api-key` CLI flag
-2. `TMDB_API_KEY` environment variable
-3. `tmdb_api_key` in config.yaml
+## How It Works
 
-## Output Structure
+The full pipeline (when run with `--movies` and `--tv`):
 
-### Movies
+1. **Flatten** — Move video files from nested subdirectories up to Season folders
+2. **Normalize** — Rename episodes to `Show - SXXEXX - Title.ext`
+3. **Organize movies** — Parse title/year, detect genre via TMDb, move to `Genre/Title (Year)/`
+4. **Organize TV** — Parse show/season/episode, move to `Show (Year)/Season XX/`
+5. **Cleanup** — Remove .nfo, .txt ads, screenshots, empty dirs
+6. **Refresh Plex** — Empty trash + trigger library scan
 
-```
-/plex/movies/
-  Action/
-    The Punisher One Last Kill (2025)/
-      The Punisher One Last Kill (2025).mkv
-      The Punisher One Last Kill (2025).eng.srt
-  Drama/
-    The Pursuit of Happyness (2006)/
-      The Pursuit of Happyness (2006).mkv
-  Sci-Fi/
-    Avatar (2009)/
-      Avatar (2009).mkv
-```
+## Plex Integration
 
-### TV Shows
-
-```
-/plex/tv/
-  Abbott Elementary (2021)/
-    Season 01/
-      Abbott.Elementary.S01E01.mkv
-    Season 02/
-      Abbott.Elementary.S02E01.mkv
-  The Copenhagen Test (2025)/
-    Season 01/
-      episode files...
-```
-
-## Edge Cases Handled
-
-- **Subtitles**: `.srt`, `.sub`, `.ass`, `.ssa`, `.vtt`, `.idx` files are moved with their video, preserving language tags
-- **Multi-file movies**: Folders containing multiple files pick the largest video file
-- **Extras/featurettes**: Files with "featurette", "behind the scenes", "deleted scenes", "sample", etc. are skipped
-- **Release group tags**: BONE, NeoNoir, YTS, GalaxyRG, TGx, FLUX, etc. are stripped from titles
-- **Quality markers**: 1080p, 4K, x265, HEVC, WEB-DL, BluRay, etc. are stripped
-- **Existing organization**: Genre folders and already-organized files are not re-processed
-
-## Undo
-
-Every run saves a detailed log to `moves.json`. To reverse the last batch:
+The organizer can auto-detect your Plex token from `Preferences.xml` or you can set it via:
 
 ```bash
-plex-organizer --undo
-plex-organizer --undo --log-file /path/to/moves.json
+# Environment variable
+export PLEX_TOKEN=your_token_here
+
+# Or CLI flag
+plex-organizer --movies /plex/movies --refresh-plex --plex-token YOUR_TOKEN
 ```
 
-## Development
+## Scheduled Operation
+
+Once set up with `--schedule`, the organizer runs automatically. The systemd service:
 
 ```bash
-# Install with dev dependencies
-pip install -e ".[dev]"
+# Check status
+systemctl status plex-organizer.timer
 
-# Run tests
-pytest
+# View last run
+journalctl -u plex-organizer.service -e
 
-# Run with coverage
-pytest --cov=plex_organizer
+# Stop scheduling
+sudo systemctl stop plex-organizer.timer
+
+# Reconfigure
+sudo plex-organizer --schedule
 ```
 
-## Requirements
+## License
 
-- Python 3.9+
-- PyYAML (for config file support)
-- Internet access (only if using TMDb API for genre detection)
-
-## Notes
-
-- On NFS/SMB mounts (like `/plex/`), you may need to run with `sudo`
-- After reorganizing, trigger a Plex library scan: Settings > Libraries > Scan Library Files
-- The tool always shows a preview and asks for confirmation before moving files (unless `--yes` is used)
+Private project.

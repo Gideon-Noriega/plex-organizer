@@ -9,6 +9,8 @@ from . import __version__
 from .config import Config, load_config
 from .organizer import PlexOrganizer, undo_moves
 from .tv_cleanup import flatten_episodes, normalize_episode_names
+from .cleanup import cleanup_junk
+from .plex import refresh_library, empty_trash
 
 
 SERVICE_TEMPLATE = """[Unit]
@@ -247,6 +249,21 @@ Examples:
         help="Normalize episode filenames to Plex format (Show - SXXEXX - Title.ext)",
     )
     parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove junk files (.nfo, torrent ads, screenshots, empty dirs)",
+    )
+    parser.add_argument(
+        "--refresh-plex",
+        action="store_true",
+        help="Trigger Plex library scan after organizing",
+    )
+    parser.add_argument(
+        "--plex-token",
+        metavar="TOKEN",
+        help="Plex auth token (or set PLEX_TOKEN env var; auto-detected from Preferences.xml)",
+    )
+    parser.add_argument(
         "--schedule",
         action="store_true",
         help="Interactive setup for automatic scheduling (requires sudo)",
@@ -297,6 +314,41 @@ Examples:
             print(f"{'Would rename' if args.dry_run else 'Renamed'} {len(renames)} files.")
         else:
             print("  All episodes already in proper format.")
+        sys.exit(0)
+
+    # Handle cleanup
+    if args.cleanup:
+        dirs_to_clean = []
+        if args.movies:
+            dirs_to_clean.append(args.movies)
+        if args.tv:
+            dirs_to_clean.append(args.tv)
+        if not dirs_to_clean:
+            config = load_config(args.config)
+            if config.movies_dir:
+                dirs_to_clean.append(config.movies_dir)
+            if config.tv_dir:
+                dirs_to_clean.append(config.tv_dir)
+        if not dirs_to_clean:
+            parser.error("--cleanup requires --movies or --tv (or set in config)")
+        for d in dirs_to_clean:
+            print(f"Cleaning junk in: {d}")
+            result = cleanup_junk(d, dry_run=args.dry_run)
+            tag = "[DRY RUN] " if args.dry_run else ""
+            if result["files"]:
+                for f in result["files"][:20]:
+                    print(f"  {tag}Removed: {os.path.basename(f)}")
+                if len(result["files"]) > 20:
+                    print(f"  ... and {len(result['files']) - 20} more files")
+            if result["dirs"]:
+                for d_path in result["dirs"][:10]:
+                    print(f"  {tag}Removed dir: {d_path}")
+                if len(result["dirs"]) > 10:
+                    print(f"  ... and {len(result['dirs']) - 10} more dirs")
+            if not result["files"] and not result["dirs"]:
+                print("  Already clean.")
+            else:
+                print(f"  {'Would remove' if args.dry_run else 'Removed'} {len(result['files'])} files, {len(result['dirs'])} directories")
         sys.exit(0)
 
     # Handle undo
@@ -380,6 +432,30 @@ Examples:
     print(f"\nDone! Moved {count} files.")
     print(f"Move log saved to: {args.log_file}")
     print("Use --undo to reverse these changes.")
+
+    # Cleanup junk after organizing
+    dirs_to_clean = []
+    if config.movies_dir:
+        dirs_to_clean.append(config.movies_dir)
+    if config.tv_dir:
+        dirs_to_clean.append(config.tv_dir)
+    for d in dirs_to_clean:
+        result = cleanup_junk(d)
+        if result["files"] or result["dirs"]:
+            print(f"Cleaned {len(result['files'])} junk files, {len(result['dirs'])} empty dirs from {d}")
+
+    # Refresh Plex
+    if args.refresh_plex or os.environ.get("PLEX_TOKEN"):
+        token = args.plex_token or os.environ.get("PLEX_TOKEN")
+        print("\nRefreshing Plex libraries...")
+        if empty_trash("1", token=token):
+            print("  Emptied trash")
+        if empty_trash("2", token=token):
+            print("  Emptied trash (Films)")
+        if refresh_library(token=token):
+            print("  Library scan triggered")
+        else:
+            print("  Could not trigger Plex refresh")
 
 
 if __name__ == "__main__":
