@@ -7,7 +7,7 @@ tv_dir: "/plex/tv"
 
 # TMDb API key (free: https://www.themoviedb.org/settings/api)
 # Can also be set via --tmdb-api-key flag or TMDB_API_KEY env var
-tmdb_api_key: "655b958566204fa158378b67d8d0b922"
+tmdb_api_key: ""
 
 # Genre map: manual genre assignment by title keyword.
 # These take priority over TMDb lookups.
