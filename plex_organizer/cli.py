@@ -8,6 +8,7 @@ import sys
 from . import __version__
 from .config import Config, load_config
 from .organizer import PlexOrganizer, undo_moves
+from .tv_cleanup import flatten_episodes, normalize_episode_names
 
 
 SERVICE_TEMPLATE = """[Unit]
@@ -174,6 +175,12 @@ Examples:
   # Use a config file
   plex-organizer --config config.yaml
 
+  # Fix nested episode folders (flatten to Season dir)
+  plex-organizer --flatten --tv /plex/tv
+
+  # Normalize episode filenames to Plex format
+  plex-organizer --normalize --tv /plex/tv
+
   # Set up automatic scheduling
   sudo plex-organizer --schedule
 
@@ -230,6 +237,16 @@ Examples:
         help="Path to moves log file (default: ./moves.json)",
     )
     parser.add_argument(
+        "--flatten",
+        action="store_true",
+        help="Flatten nested episode folders (move video files up to Season directory)",
+    )
+    parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Normalize episode filenames to Plex format (Show - SXXEXX - Title.ext)",
+    )
+    parser.add_argument(
         "--schedule",
         action="store_true",
         help="Interactive setup for automatic scheduling (requires sudo)",
@@ -240,6 +257,46 @@ Examples:
     # Handle schedule setup
     if args.schedule:
         setup_schedule()
+        sys.exit(0)
+
+    # Handle flatten
+    if args.flatten:
+        tv_dir = args.tv
+        if not tv_dir:
+            config = load_config(args.config)
+            tv_dir = config.tv_dir
+        if not tv_dir:
+            parser.error("--flatten requires --tv or tv_dir in config")
+        print(f"Flattening nested episodes in: {tv_dir}")
+        moves = flatten_episodes(tv_dir, dry_run=args.dry_run)
+        if moves:
+            for m in moves:
+                tag = "[DRY RUN] " if args.dry_run else ""
+                print(f"  {tag}{os.path.basename(m['source'])} -> {os.path.dirname(m['destination'])}/")
+            print(f"\n{'Would flatten' if args.dry_run else 'Flattened'} {len(moves)} files.")
+        else:
+            print("  No nested episodes found. All clean.")
+        sys.exit(0)
+
+    # Handle normalize
+    if args.normalize:
+        tv_dir = args.tv
+        if not tv_dir:
+            config = load_config(args.config)
+            tv_dir = config.tv_dir
+        if not tv_dir:
+            parser.error("--normalize requires --tv or tv_dir in config")
+        print(f"Normalizing episode names in: {tv_dir}")
+        renames = normalize_episode_names(tv_dir, dry_run=args.dry_run)
+        if renames:
+            for r in renames:
+                tag = "[DRY RUN] " if args.dry_run else ""
+                print(f"  {tag}{r['old_name']}")
+                print(f"    -> {r['new_name']}")
+                print()
+            print(f"{'Would rename' if args.dry_run else 'Renamed'} {len(renames)} files.")
+        else:
+            print("  All episodes already in proper format.")
         sys.exit(0)
 
     # Handle undo
@@ -280,6 +337,16 @@ Examples:
         print(f"  Found {len(movie_moves)} movie moves")
 
     if config.tv_dir:
+        # Flatten nested episodes first
+        flat_moves = flatten_episodes(config.tv_dir, dry_run=args.dry_run)
+        if flat_moves:
+            print(f"\nFlattened {len(flat_moves)} nested episodes")
+
+        # Normalize episode names
+        norm_renames = normalize_episode_names(config.tv_dir, dry_run=args.dry_run)
+        if norm_renames:
+            print(f"Normalized {len(norm_renames)} episode filenames")
+
         print(f"\nScanning TV shows: {config.tv_dir}")
         tv_moves = organizer.plan_tv(config.tv_dir)
         total_moves.extend(tv_moves)
