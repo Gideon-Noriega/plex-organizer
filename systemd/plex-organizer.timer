@@ -1,0 +1,9 @@
+[Unit]
+Description=Run Plex Organizer daily at 1am EAT (10pm UTC)
+
+[Timer]
+OnCalendar=*-*-* 22:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

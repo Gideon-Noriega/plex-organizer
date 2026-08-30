@@ -11,6 +11,7 @@ from .organizer import PlexOrganizer, undo_moves
 from .tv_cleanup import flatten_episodes, normalize_episode_names
 from .cleanup import cleanup_junk
 from .plex import refresh_library, empty_trash
+from . import arr
 
 
 SERVICE_TEMPLATE = """[Unit]
@@ -157,6 +158,27 @@ def setup_schedule():
     print("  sudo plex-organizer --schedule           # Reconfigure schedule")
 
 
+def run_arr_sync(config, args):
+    """Repoint Sonarr and Radarr at whatever this run renamed.
+
+    This runs by default whenever API keys are present, because skipping it is
+    not a neutral choice: an *arr left pointing at a path that no longer exists
+    cannot upgrade or replace that file, so its next grab lands beside the copy
+    already on disk. That is where duplicate media comes from.
+    """
+    if args.no_arr_sync:
+        return
+    if not args.arr_sync and not arr.clients_from_env():
+        return
+
+    print("\nSyncing Sonarr/Radarr with the new paths...")
+    arr.sync(
+        movies_dir=config.movies_dir,
+        tv_dir=config.tv_dir,
+        dry_run=args.dry_run,
+    )
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -262,6 +284,18 @@ Examples:
         "--plex-token",
         metavar="TOKEN",
         help="Plex auth token (or set PLEX_TOKEN env var; auto-detected from Preferences.xml)",
+    )
+    parser.add_argument(
+        "--arr-sync",
+        action="store_true",
+        help="After organizing, repoint Sonarr/Radarr at the renamed files "
+             "(needs SONARR_API_KEY / RADARR_API_KEY; on by default when those "
+             "are set)",
+    )
+    parser.add_argument(
+        "--no-arr-sync",
+        action="store_true",
+        help="Skip the Sonarr/Radarr sync even when API keys are configured",
     )
     parser.add_argument(
         "--schedule",
@@ -406,6 +440,9 @@ Examples:
 
     if not total_moves:
         print("\nNothing to organize. All files appear to be in the right place.")
+        # Still reconcile: --flatten and --normalize rename files without
+        # producing moves, and drift can predate this run entirely.
+        run_arr_sync(config, args)
         sys.exit(0)
 
     # Show preview
@@ -414,6 +451,7 @@ Examples:
 
     if args.dry_run:
         print("[DRY RUN] No files were moved.")
+        run_arr_sync(config, args)
         sys.exit(0)
 
     # Confirm unless --yes
@@ -443,6 +481,9 @@ Examples:
         result = cleanup_junk(d)
         if result["files"] or result["dirs"]:
             print(f"Cleaned {len(result['files'])} junk files, {len(result['dirs'])} empty dirs from {d}")
+
+    # Tell the *arrs where things went before Plex rescans.
+    run_arr_sync(config, args)
 
     # Refresh Plex
     if args.refresh_plex or os.environ.get("PLEX_TOKEN"):

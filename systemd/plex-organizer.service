@@ -1,0 +1,18 @@
+[Unit]
+Description=Plex Organizer - Organize media into Plex naming conventions
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/gkipsang/projects/plex-organizer
+# Secrets live in a root-only file rather than Environment= lines, which are
+# readable by any user via "systemctl cat". Also carries SONARR_/RADARR_ keys
+# for --arr-sync.
+EnvironmentFile=/etc/plex-organizer.env
+# --arr-sync repoints Sonarr/Radarr at the files this run renamed. Without it an
+# *arr keeps pointing at a path that no longer exists, and because it can then
+# neither upgrade nor replace that file, its next grab lands beside the copy
+# already on disk. That is where the duplicate media came from.
+ExecStart=/home/gkipsang/projects/plex-organizer/.venv/bin/plex-organizer --movies /plex/movies --tv /plex/tv --config /home/gkipsang/projects/plex-organizer/config.yaml --yes --refresh-plex --arr-sync

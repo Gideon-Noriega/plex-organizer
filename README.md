@@ -10,6 +10,7 @@ A CLI tool to automatically organize messy media files into proper [Plex naming 
 - **Normalize episode names** — Rename to Plex format: `Show - SXXEXX - Title.ext` (strips release groups, codec tags, torrent site names)
 - **Junk cleanup** — Remove .nfo, torrent site ads (.txt), screenshots, .parts files, and empty directories
 - **Plex integration** — Trigger library scan and empty trash after organizing
+- **Sonarr/Radarr sync** — Repoint the *arrs at the files this tool renamed, so they stop re-downloading media that is already on disk
 - **TMDb genre detection** — Auto-assign genres via [TMDb API](https://www.themoviedb.org/documentation/api) (free)
 - **Scheduling** — Interactive setup for automatic daily/hourly runs via systemd timer
 - **Dry run mode** — Preview all changes before executing
@@ -97,6 +98,126 @@ Options:
 plex-organizer --undo
 ```
 
+## Sonarr / Radarr sync
+
+This tool renames and relocates files that Sonarr and Radarr imported. Both have
+their own renaming turned off (`renameEpisodes` and `renameMovies` are false), so
+each import arrives under its release name and is reorganised afterwards.
+Nothing tells the *arr, and its database goes on pointing at a path that no
+longer exists.
+
+That is not cosmetic. **An *arr that has lost track of a file cannot upgrade or
+replace it, so the next grab for the same episode or movie lands beside the
+existing copy instead of over it.** That is where duplicate media comes from. On
+2026-08-29 the libraries here held 30 such stale paths, Radarr could see files
+for only 3 of its 30 movies, and `The Gentleman Thief (2026)` had both a `.mp4`
+and a `.mkv` of the same film that Radarr was tracking neither of.
+
+The sync reconciles each *arr's records against what is actually on disk and
+repairs two layers of drift:
+
+| Drift | Example | Repair |
+| --- | --- | --- |
+| The show or movie **folder** was renamed | Sonarr held `/data/tv/The Dark`, disk had `The Dark (2026)` | `PUT` the record with `moveFiles=false`, then rescan |
+| The **filename** was normalised inside a folder that is still correct | `Rick and Morty S09E03 ... AMZN WEB-DL.mkv` → `Rick and Morty - S09E03 - Rick Fu Hustle.mkv` | rescan that folder |
+
+`moveFiles=false` matters: the file is already where it should be, so the record
+is updated without touching the disk. A rescan afterwards re-matches the
+renamed files.
+
+### Usage
+
+It runs automatically after organizing whenever API keys are present:
+
+```bash
+export SONARR_URL=http://localhost:8989   # optional, this is the default
+export SONARR_API_KEY=...
+export RADARR_URL=http://localhost:7878   # optional, this is the default
+export RADARR_API_KEY=...
+
+plex-organizer --movies /plex/movies --tv /plex/tv --yes
+```
+
+A missing API key silently disables that half of the sync. To be explicit:
+
+```bash
+plex-organizer ... --arr-sync      # force it on
+plex-organizer ... --no-arr-sync   # skip it even with keys configured
+```
+
+`--dry-run` reports what it would send without sending anything.
+
+The API keys can be read out of the container configs:
+
+```bash
+sudo grep -oP '(?<=<ApiKey>)[^<]+' ~/sonarr/config/config.xml
+sudo grep -oP '(?<=<ApiKey>)[^<]+' ~/radarr/config/config.xml
+```
+
+### What it refuses to do
+
+A record whose folder cannot be located **unambiguously** is reported and left
+alone. Ambiguity is handed to a human rather than settled by a tie-break, for two
+reasons: a tracked path can also be missing because the file was genuinely
+deleted, which must never be repointed at a lookalike; and a tie-break that is
+merely deterministic is not necessarily a safe one.
+
+In practice the ambiguous cases are titles that exist in two genre folders at
+once, usually `Other/` plus the real genre — the tool filed them under `Other/`
+before the TMDb genre lookup succeeded, then filed the next copy correctly:
+
+```
+radarr movie 5: /plex/movies/Toy Story 5 (2026) is gone and 2 folders match
+'Toy Story 5' (Animation/Toy Story 5 (2026), Other/Toy Story 5 (2026)); left alone
+```
+
+Resolve those by deleting the copy you do not want, then re-running.
+
+Titles that are merely monitored and not yet downloaded are **not** drift — an
+*arr creates the folder on import, so no folder and no file is the normal state
+for something on the wanted list. Those are skipped silently.
+
+### Why rescans run in a second pass
+
+Rescans are issued only after every repoint for that *arr has landed. A rescan
+queued in the same breath as its own `PUT` races the refresh that the `PUT`
+itself triggers, and loses: it scans the path the record used to have, finds
+nothing, and leaves the stale filenames in the database. The failure is silent —
+the command reports `completed`. Each rescan is therefore polled to completion,
+which also turns a silent no-op into a reported error.
+
+### Why it reconciles against the *arr, not against `moves.json`
+
+`flatten_episodes` and `normalize_episode_names` rename files without going
+through `PlexOrganizer.execute`, so they never appear in the move log. Comparing
+the database to the disk catches every path equally, and clears drift that
+accumulated before this feature existed.
+
+## Scheduling
+
+`systemd/` holds the units used on the homelab:
+
+```bash
+sudo cp systemd/plex-organizer.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now plex-organizer.timer
+```
+
+The unit reads secrets from `/etc/plex-organizer.env` rather than `Environment=`
+lines, because those are readable by any user via `systemctl cat`:
+
+```bash
+sudo install -m 600 -o root -g root /dev/null /etc/plex-organizer.env
+sudo tee /etc/plex-organizer.env > /dev/null <<'EOF'
+TMDB_API_KEY=...
+PLEX_TOKEN=...
+SONARR_URL=http://localhost:8989
+SONARR_API_KEY=...
+RADARR_URL=http://localhost:7878
+RADARR_API_KEY=...
+EOF
+```
+
 ## Configuration
 
 Copy and edit `config.yaml`:
@@ -142,6 +263,10 @@ genre_folders:
 |----------|-------------|
 | `TMDB_API_KEY` | TMDb API key for genre detection |
 | `PLEX_TOKEN` | Plex authentication token for library refresh |
+| `SONARR_API_KEY` | Enables the Sonarr half of `--arr-sync`; absent means skip |
+| `SONARR_URL` | Defaults to `http://localhost:8989` |
+| `RADARR_API_KEY` | Enables the Radarr half of `--arr-sync`; absent means skip |
+| `RADARR_URL` | Defaults to `http://localhost:7878` |
 
 ## How It Works
 
@@ -152,7 +277,9 @@ The full pipeline (when run with `--movies` and `--tv`):
 3. **Organize movies** — Parse title/year, detect genre via TMDb, move to `Genre/Title (Year)/`
 4. **Organize TV** — Parse show/season/episode, move to `Show (Year)/Season XX/`
 5. **Cleanup** — Remove .nfo, .txt ads, screenshots, empty dirs
-6. **Refresh Plex** — Empty trash + trigger library scan
+6. **Sync Sonarr/Radarr** — Repoint them at the renamed files, so they do not
+   re-download what is already on disk (see [Sonarr / Radarr sync](#sonarr--radarr-sync))
+7. **Refresh Plex** — Empty trash + trigger library scan
 
 ## Plex Integration
 
@@ -168,7 +295,8 @@ plex-organizer --movies /plex/movies --refresh-plex --plex-token YOUR_TOKEN
 
 ## Scheduled Operation
 
-Once set up with `--schedule`, the organizer runs automatically. The systemd service:
+Once set up with `--schedule`, or from the units in `systemd/` (see
+[Scheduling](#scheduling)), the organizer runs automatically:
 
 ```bash
 # Check status
