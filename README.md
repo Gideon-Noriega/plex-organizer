@@ -209,10 +209,12 @@ and `NOISE_PATTERNS` in `parser.py` strips exactly those tokens:
 The Whisper Man (2026) 1080p BRRip 5.1 x264 -YTS.mkv   ->   The Whisper Man (2026).mkv
 ```
 
-With no source token left the parser falls back to `HDTV-1080p`. That is below
-the `HD-1080p` profile cutoff (`Bluray-1080p`) on an `upgradeAllowed=True`
-profile, so Radarr believes it is holding a bad file and goes shopping. It
-replaced a genuine Bluray with a WEBRip and logged `reason=Upgrade`.
+With no source token left the parser falls back on the container: `.mp4` files
+are re-graded `HDTV-1080p` and `.mkv` files `WEBDL-1080p`. Both are below the
+`HD-1080p` profile cutoff (`Bluray-1080p`) on an `upgradeAllowed=True` profile,
+so Radarr believes it is holding a bad file and goes shopping. It replaced a
+genuine Bluray with a WEBRip and logged `reason=Upgrade`. 35 files in that
+library ended up with a stripped name, 18 of them recorded below cutoff.
 
 `--arr-sync` does not help and never did: it correctly repoints the path and
 queues a rescan, but **a rescan restores the pointer, not the grade** — the grade

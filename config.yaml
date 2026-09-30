@@ -5,6 +5,14 @@
 movies_dir: "/plex/movies"
 tv_dir: "/plex/tv"
 
+# Never rename video files, only move them. Sonarr and Radarr re-derive a
+# file's quality by re-parsing its name, so the quality tokens in a release
+# filename are the only record of quality outside their database. Renaming
+# makes them re-grade the file HDTV-1080p, fall below the profile cutoff, and
+# re-download it -- sometimes with something worse. See
+# media-stack/docs/quality-token-loss.md.
+keep_filenames: true
+
 # TMDb API key (free: https://www.themoviedb.org/settings/api)
 # Can also be set via --tmdb-api-key flag or TMDB_API_KEY env var
 tmdb_api_key: ""
