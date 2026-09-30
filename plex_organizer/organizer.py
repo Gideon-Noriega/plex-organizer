@@ -140,7 +140,13 @@ class PlexOrganizer:
             else:
                 folder_name = info.title
 
-            file_name = f"{folder_name}{ext}"
+            # Renaming the file destroys the quality/source tokens that
+            # Sonarr and Radarr re-parse to grade it, so keep_filenames moves
+            # the file into the genre folder without touching its name.
+            if self.config.keep_filenames:
+                file_name = os.path.basename(source)
+            else:
+                file_name = f"{folder_name}{ext}"
             dest_dir = os.path.join(movies_dir, genre, folder_name)
             dest_path = os.path.join(dest_dir, file_name)
 

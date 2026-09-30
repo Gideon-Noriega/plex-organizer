@@ -271,6 +271,15 @@ Examples:
         help="Normalize episode filenames to Plex format (Show - SXXEXX - Title.ext)",
     )
     parser.add_argument(
+        "--keep-filenames",
+        action="store_true",
+        help="Move files into the right folders but never rename them. Use this "
+             "whenever Sonarr/Radarr manage the library: the quality tokens in a "
+             "release filename are the only record of quality outside the *arr "
+             "database, and rewriting them makes the *arr re-grade the file and "
+             "re-download it",
+    )
+    parser.add_argument(
         "--cleanup",
         action="store_true",
         help="Remove junk files (.nfo, torrent ads, screenshots, empty dirs)",
@@ -404,6 +413,8 @@ Examples:
         config.movies_dir = args.movies
     if args.tv:
         config.tv_dir = args.tv
+    if args.keep_filenames:
+        config.keep_filenames = True
 
     # TMDb API key: CLI > env var > config file
     tmdb_key = args.tmdb_api_key or os.environ.get("TMDB_API_KEY") or config.tmdb_api_key
@@ -428,10 +439,16 @@ Examples:
         if flat_moves:
             print(f"\nFlattened {len(flat_moves)} nested episodes")
 
-        # Normalize episode names
-        norm_renames = normalize_episode_names(config.tv_dir, dry_run=args.dry_run)
-        if norm_renames:
-            print(f"Normalized {len(norm_renames)} episode filenames")
+        # Normalize episode names. Skipped under --keep-filenames: this is the
+        # step that strips the quality tokens Sonarr re-parses, so on an
+        # *arr-managed library it causes the re-downloads it was meant to tidy.
+        if config.keep_filenames:
+            print("Keeping episode filenames as imported (--keep-filenames)")
+        else:
+            norm_renames = normalize_episode_names(config.tv_dir,
+                                                   dry_run=args.dry_run)
+            if norm_renames:
+                print(f"Normalized {len(norm_renames)} episode filenames")
 
         print(f"\nScanning TV shows: {config.tv_dir}")
         tv_moves = organizer.plan_tv(config.tv_dir)

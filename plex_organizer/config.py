@@ -20,6 +20,15 @@ class Config:
     genre_map: dict = field(default_factory=dict)
     title_overrides: dict = field(default_factory=dict)
     tv_overrides: dict = field(default_factory=dict)
+    # Leave video filenames exactly as the *arr imported them, and only
+    # move files between folders. The quality/source tokens in a release
+    # filename (1080p, WEB-DL, BluRay) are the ONLY record of quality
+    # outside the *arr database, and Sonarr/Radarr re-derive quality by
+    # re-parsing the name. Rewriting it to "Title (Year).ext" makes them
+    # re-grade the file HDTV-1080p, which falls below the profile cutoff
+    # and triggers a pointless -- sometimes downgrading -- re-download.
+    # See docs/quality-token-loss.md in the media-stack repo.
+    keep_filenames: bool = False
     genre_folders: list = field(
         default_factory=lambda: [
             "Action",
@@ -85,6 +94,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
         config.genre_map = data.get("genre_map", config.genre_map)
         config.title_overrides = data.get("title_overrides", config.title_overrides)
         config.tv_overrides = data.get("tv_overrides", config.tv_overrides)
+        config.keep_filenames = data.get("keep_filenames", config.keep_filenames)
 
         if "genre_folders" in data:
             config.genre_folders = data["genre_folders"]

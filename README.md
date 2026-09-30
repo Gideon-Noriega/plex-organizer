@@ -11,6 +11,7 @@ A CLI tool to automatically organize messy media files into proper [Plex naming 
 - **Junk cleanup** — Remove .nfo, torrent site ads (.txt), screenshots, .parts files, and empty directories
 - **Plex integration** — Trigger library scan and empty trash after organizing
 - **Sonarr/Radarr sync** — Repoint the *arrs at the files this tool renamed, so they stop re-downloading media that is already on disk
+- **`--keep-filenames`** — Organize without renaming. Required on an *arr-managed library: the quality tokens in a release filename are the only record of quality outside the *arr database
 - **TMDb genre detection** — Auto-assign genres via [TMDb API](https://www.themoviedb.org/documentation/api) (free)
 - **Scheduling** — Interactive setup for automatic daily/hourly runs via systemd timer
 - **Dry run mode** — Preview all changes before executing
@@ -193,6 +194,58 @@ through `PlexOrganizer.execute`, so they never appear in the move log. Comparing
 the database to the disk catches every path equally, and clears drift that
 accumulated before this feature existed.
 
+## `--keep-filenames`: the rename is itself the bug
+
+The sync above repairs drift after the fact. It cannot repair everything, and on
+2026-09-30 it turned out that **renaming an *arr-managed file is destructive in a
+way no amount of syncing can undo.**
+
+Sonarr and Radarr store no durable record of a file's quality. They **re-derive
+it by re-parsing the filename** on every scan, so the quality/source tokens in a
+release name are the only copy of that information outside the *arr database —
+and `NOISE_PATTERNS` in `parser.py` strips exactly those tokens:
+
+```
+The Whisper Man (2026) 1080p BRRip 5.1 x264 -YTS.mkv   ->   The Whisper Man (2026).mkv
+```
+
+With no source token left the parser falls back to `HDTV-1080p`. That is below
+the `HD-1080p` profile cutoff (`Bluray-1080p`) on an `upgradeAllowed=True`
+profile, so Radarr believes it is holding a bad file and goes shopping. It
+replaced a genuine Bluray with a WEBRip and logged `reason=Upgrade`.
+
+`--arr-sync` does not help and never did: it correctly repoints the path and
+queues a rescan, but **a rescan restores the pointer, not the grade** — the grade
+came from the name that was just destroyed. Radarr `movieFileDeleted
+reason=MissingFromDisk` totals 22 before the day `arr.py` landed and 22 after.
+
+So on an *arr-managed library, do not rename:
+
+```bash
+plex-organizer --movies /plex/movies --tv /plex/tv --keep-filenames --yes
+```
+
+`--keep-filenames` (or `keep_filenames: true` in `config.yaml`) suppresses both
+rename sites — `normalize_episode_names` for TV and the `Title (Year).ext`
+rebuild in `plan_movies` for films — while keeping everything the *arrs cannot
+do: genre foldering, flattening nested episode folders, junk cleanup, and the
+Plex refresh. Files still move into the right folders; only their names are left
+as imported.
+
+```
+default           Idiots 2026 1080p WEB-DL HEVC x265 5.1 BONE.mkv -> Idiots (2026).mkv
+--keep-filenames  Idiots 2026 1080p WEB-DL HEVC x265 5.1 BONE.mkv -> (unchanged)
+```
+
+Let the *arrs rename instead. Both already have Plex-convention formats that
+include `{Quality Full}`; both simply had renaming turned off, which is the only
+reason this tool ever renamed anything. An *arr that renames its own file updates
+its database in the same operation, so drift is structurally impossible **and**
+the quality token survives.
+
+Full writeup, including the repair list for the 10 movies this mis-graded:
+[`media-stack/docs/quality-token-loss.md`](https://github.com/Gideon-Noriega/media-stack/blob/main/docs/quality-token-loss.md).
+
 ## Scheduling
 
 `systemd/` holds the units used on the homelab:
@@ -241,6 +294,10 @@ genre_map:
 # Fix misdetected titles
 title_overrides:
   "Some Messy Parsed Title": "Correct Title"
+
+# Never rename video files, only move them. Set this whenever Sonarr/Radarr
+# manage the library -- see the --keep-filenames section above.
+keep_filenames: false
 
 # Fix TV shows with unparseable folder names
 tv_overrides:
